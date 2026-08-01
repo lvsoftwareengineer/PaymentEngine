@@ -128,45 +128,24 @@ broker provides. The engine does not change; only the transport around it
 does.
 
 ```mermaid
----
-config:
-  layout: elk
----
 flowchart LR
- subgraph T["Kafka topic<br>Partitioned by key: client ID"]
-    direction TB
-        p0["Partition 0"]
-        p1["Partition 1"]
-        pn["Partition N"]
+ subgraph T["Kafka topic (keyed by client id)"]
+    p0["Partition 0"]
+    p1["Partition 1"]
+    pn["Partition N"]
   end
  subgraph CG["Payment Engine"]
-    direction TB
-        e0["Engine instance 0<br>process(tx)"]
-        e1["Engine instance 1<br>process(tx)"]
-        en["Engine instance N<br>process(tx)"]
+    e0["Engine instance 0<br>process(tx)"]
+    e1["Engine instance 1<br>process(tx)"]
+    en["Engine instance N<br>process(tx)"]
   end
     p0 --> e0
     p1 --> e1
     pn --> en
-    e0 --> PG[("Postgres<br>Append-only ledger")]
+    e0 --> PG[("Postgres<br>append-only ledger")]
     e1 --> PG
     en --> PG
     PG --> API["Account API / reporting"]
-
-     p0:::kafka
-     p1:::kafka
-     pn:::kafka
-     e0:::consumer
-     e1:::consumer
-     en:::consumer
-     PG:::storage
-     API:::output
-     T:::kafka
-    classDef producer stroke:#818cf8,fill:#eef2ff
-    classDef kafka stroke:#fb923c,fill:#fff7ed
-    classDef consumer stroke:#2dd4bf,fill:#f0fdfa
-    classDef storage stroke:#a78bfa,fill:#f5f3ff
-    classDef output stroke:#4ade80,fill:#f0fdf4
 ```
 
 - **Keyed partitioning gives per-client ordering for free.** Producing with
