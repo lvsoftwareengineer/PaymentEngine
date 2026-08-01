@@ -26,6 +26,7 @@ impl Account{
     }    
 }
 
+#[derive(PartialEq)]
 pub enum DepositState {
     Posted,
     Disputed,
