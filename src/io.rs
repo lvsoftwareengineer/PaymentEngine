@@ -1,5 +1,6 @@
 use anyhow::Error;
 use rust_decimal::Decimal;
+use crate::engine::PaymentEngine;
 use crate::model::{ClientId, TxId, Transaction};
 use crate::store::Store;
 use csv::{ReaderBuilder, Trim};
@@ -46,6 +47,27 @@ pub fn csv_reader<R: Read>(source: R) -> csv::Reader<R> {
         .trim(Trim::All)
         .flexible(true)
         .from_reader(source)
+}
+
+pub fn process_csv<R: Read>(input: R, engine: &mut PaymentEngine, mut on_error: impl FnMut(String)) {
+    for row in csv_reader(input).deserialize::<CsvRecord>() {
+        let record = match row {
+            Ok(record) => record,
+            Err(e) => {
+                on_error(format!("skipping malformed row: {e}"));
+                continue;
+            }
+        };
+
+        match Transaction::try_from(record) {
+            Ok(tx) => {
+                if let Err(e) = engine.process(tx) {
+                    on_error(format!("transaction rejected: {e}"));
+                }
+            }
+            Err(e) => on_error(format!("skipping row: {e}")),
+        }
+    }
 }
 
 pub fn write_accounts<W: Write>(store: &Store, mut writer: W) -> Result<(), Error> {
@@ -199,6 +221,34 @@ mod tests {
         let mut buf = Vec::new();
         write_accounts(store, &mut buf).unwrap();
         String::from_utf8(buf).unwrap()
+    }
+
+    // --- Full pipeline ---
+
+    use crate::engine::PaymentEngine;
+
+    #[test]
+    fn process_csv_runs_rows_through_the_engine_and_reports_failures() {
+        let input = "\
+            type, client, tx, amount
+            deposit, 1, 1, 10.0
+            withdrawal, 1, 2, 3.0
+            transfer, 1, 3, 1.0
+            junk
+            withdrawal, 1, 4, 100.0
+        ";
+        let mut engine = PaymentEngine::new();
+        let mut errors = Vec::new();
+
+        process_csv(input.as_bytes(), &mut engine, |e| errors.push(e));
+
+        let account = engine.store().get_account(1).unwrap();
+        assert_eq!(account.available, dec!(7.0));
+
+        assert_eq!(errors.len(), 3);
+        assert!(errors[0].contains("unknown transaction type"));
+        assert!(errors[1].contains("malformed row"));
+        assert!(errors[2].contains("Insufficient funds"));
     }
 
     #[test]
