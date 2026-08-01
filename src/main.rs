@@ -1,3 +1,9 @@
+//! CLI edge: `payment_engine <transactions.csv>`.
+//!
+//! Stdout carries only the output CSV; malformed rows and rejected
+//! transactions go to stderr and are skipped. The exit code is nonzero
+//! only when the argument is missing or the input file cannot be opened.
+
 use anyhow::Context;
 use payment_engine::engine::PaymentEngine;
 use payment_engine::io::{process_csv, write_accounts};

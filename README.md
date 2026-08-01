@@ -12,6 +12,7 @@ states as CSV.
 ```sh
 cargo run -- transactions.csv > accounts.csv
 cargo test
+cargo doc --open   # rendered API docs (module and function contracts)
 ```
 
 Stdout carries only the output CSV (`client,available,held,total,locked`).

@@ -1,7 +1,22 @@
+//! All business rules live here. The engine performs no I/O and knows
+//! nothing about CSV — it consumes [`Transaction`]s and mutates the
+//! [`Store`], returning a typed [`TxError`] for every rejection.
+
 use crate::model::*;
 use crate::store::Store;
 use rust_decimal::Decimal;
 
+/// Applies transactions to accounts, enforcing every business rule.
+///
+/// # Invariants
+///
+/// - **No I/O.** Logging and parsing are the caller's problem.
+/// - **State is never mutated on any `Err` path** — validation happens
+///   before the first write, so a rejected transaction leaves balances,
+///   deposit states and lock flags exactly as they were.
+/// - **Check order is fixed per operation** (e.g. `locked` before amount
+///   validation, `UnknownTx` before `ClientMismatch`), so the same bad
+///   input always yields the same error.
 #[derive(Default)]
 pub struct PaymentEngine {
     store: Store,
@@ -12,10 +27,15 @@ impl PaymentEngine {
         Self::default()
     }
 
+    /// Read access to the final state, for writing the output.
     pub fn store(&self) -> &Store {
         &self.store
     }
 
+    /// Applies one transaction, dispatching to the matching rule set.
+    ///
+    /// Returns `Err` with the reason for rejection; state is untouched in
+    /// that case (see the type-level invariants).
     pub fn process(&mut self, tx: Transaction) -> Result<(), TxError> {
         match tx {
             Transaction::Deposit { client, tx, amount } => self.deposit(client, tx, amount),
@@ -26,6 +46,9 @@ impl PaymentEngine {
         }
     }
 
+    /// Credits `available` and retains the deposit as `Posted` so it can be
+    /// disputed later. Note: even a rejected deposit creates the account
+    /// (ghost clients appear in the output).
     fn deposit(&mut self, client: ClientId, tx: TxId, amount: Decimal) -> Result<(), TxError> {
         let account = self.store.account_or_create(client);
 
@@ -39,6 +62,7 @@ impl PaymentEngine {
             return Err(TxError::DuplicateTx { tx });
         }
 
+        // Re-borrow: `account` was dropped by the `contains_tx` check above.
         let account = self.store.account_or_create(client);
         let new_available = account
             .available
@@ -60,6 +84,7 @@ impl PaymentEngine {
         Ok(())
     }
 
+    /// Debits `available` if funds suffice. Withdrawals are not retained.
     fn withdraw(&mut self, client: ClientId, tx: TxId, amount: Decimal) -> Result<(), TxError> {
         let account = self.store.account_or_create(client);
 
@@ -83,6 +108,10 @@ impl PaymentEngine {
         Ok(())
     }
 
+    /// Moves the deposited amount `available → held` and marks the deposit
+    /// `Disputed`. If the funds were already spent, `available` goes
+    /// negative — that shortfall is the client's debt. Processes even on a
+    /// locked account.
     fn dispute(&mut self, client: ClientId, tx: TxId) -> Result<(), TxError> {
         let record = self
             .store
@@ -120,6 +149,9 @@ impl PaymentEngine {
         Ok(())
     }
 
+    /// Releases the held amount back to `available` and returns the deposit
+    /// to `Posted` — from where it may be disputed again. Processes even on
+    /// a locked account.
     fn resolve(&mut self, client: ClientId, tx: TxId) -> Result<(), TxError> {
         let record = self
             .store
@@ -157,6 +189,9 @@ impl PaymentEngine {
         Ok(())
     }
 
+    /// Withdraws the held amount for good, marks the deposit `ChargedBack`
+    /// (terminal) and locks the account. Processes even on an already
+    /// locked account, so a frozen account can still receive chargebacks.
     fn chargeback(&mut self, client: ClientId, tx: TxId) -> Result<(), TxError> {
         let record = self
             .store

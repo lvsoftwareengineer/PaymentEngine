@@ -1,6 +1,11 @@
+//! In-memory state behind intention-revealing methods. A dumb container:
+//! no business rules live here — those belong to [`crate::engine`].
+
 use crate::model::{Account, ClientId, DepositRecord, TxId};
 use std::collections::HashMap;
 
+/// Holds all mutable state: per-client accounts and the retained deposits
+/// (the only disputable transactions, so the only ones stored).
 #[derive(Default)]
 pub struct Store {
     accounts: HashMap<ClientId, Account>,
@@ -12,6 +17,9 @@ impl Store {
         Self::default()
     }
 
+    /// Returns the client's account, creating a default (zeroed, unlocked)
+    /// one on first access. This is how "ghost clients" — accounts whose
+    /// only transaction was rejected — end up in the output.
     pub fn account_or_create(&mut self, id: ClientId) -> &mut Account {
         self.accounts.entry(id).or_default()
     }
@@ -32,10 +40,14 @@ impl Store {
         self.deposits.insert(id, record);
     }
 
+    /// True if a deposit with this tx id was already stored — the duplicate
+    /// check for incoming deposits.
     pub fn contains_tx(&self, id: TxId) -> bool {
         self.deposits.contains_key(&id)
     }
 
+    /// Iterates all accounts for output. Order is unspecified (HashMap
+    /// iteration order).
     pub fn iter_accounts(&self) -> impl Iterator<Item = (&ClientId, &Account)> {
         self.accounts.iter()
     }

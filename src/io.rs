@@ -1,3 +1,7 @@
+//! The parse boundary and the writer. Everything CSV-shaped lives here:
+//! raw rows are validated and normalized into [`Transaction`]s before the
+//! engine ever sees them, and final balances are rendered back to CSV.
+
 use crate::engine::PaymentEngine;
 use crate::model::{ClientId, Transaction, TxId};
 use crate::store::Store;
@@ -7,6 +11,11 @@ use serde::Deserialize;
 use std::io::{Read, Write};
 use thiserror::Error;
 
+/// Validates a raw CSV row into a [`Transaction`].
+///
+/// This is where normalization happens: type strings are matched
+/// case-insensitively, amounts are rounded to 4 decimal places at ingest,
+/// and a stray amount on a dispute-family row is tolerated and dropped.
 impl TryFrom<CsvRecord> for Transaction {
     type Error = RowError;
 
@@ -40,6 +49,7 @@ impl TryFrom<CsvRecord> for Transaction {
     }
 }
 
+/// Why a well-formed CSV row could not become a [`Transaction`].
 #[derive(Debug, Error, PartialEq)]
 pub enum RowError {
     #[error("unknown transaction type {kind:?} (tx {tx})")]
@@ -49,6 +59,10 @@ pub enum RowError {
     MissingAmount { tx: TxId },
 }
 
+/// Builds the CSV reader used everywhere: whitespace-tolerant
+/// (`Trim::All`) and `flexible` so dispute-family rows may omit the
+/// trailing amount column. Rows are streamed — the input is never loaded
+/// into memory.
 pub fn csv_reader<R: Read>(source: R) -> csv::Reader<R> {
     ReaderBuilder::new()
         .trim(Trim::All)
@@ -56,6 +70,12 @@ pub fn csv_reader<R: Read>(source: R) -> csv::Reader<R> {
         .from_reader(source)
 }
 
+/// Streams `input` through the engine, row by row.
+///
+/// This function never fails: malformed rows, unconvertible rows and
+/// transactions rejected by the engine are each reported through
+/// `on_error` as a human-readable message and skipped, and processing
+/// continues with the next row.
 pub fn process_csv<R: Read>(
     input: R,
     engine: &mut PaymentEngine,
@@ -81,6 +101,12 @@ pub fn process_csv<R: Read>(
     }
 }
 
+/// Writes the final account states as CSV
+/// (`client,available,held,total,locked`).
+///
+/// `total` is computed here (`available + held`), never stored, so it
+/// cannot drift. Row order is unspecified — it follows the store's
+/// iteration order.
 pub fn write_accounts<W: Write>(store: &Store, mut writer: W) -> std::io::Result<()> {
     writeln!(writer, "client,available,held,total,locked")?;
 
@@ -99,6 +125,10 @@ pub fn write_accounts<W: Write>(store: &Store, mut writer: W) -> std::io::Result
     Ok(())
 }
 
+/// A raw CSV row, exactly as deserialized — not yet validated.
+///
+/// `amount` is `Option` because dispute-family rows carry none, and
+/// `kind` is renamed from the column header `type`, a Rust keyword.
 #[derive(Debug, Deserialize)]
 pub struct CsvRecord {
     #[serde(rename = "type")]
