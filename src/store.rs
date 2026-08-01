@@ -40,6 +40,10 @@ impl Store {
         self.deposits.contains_key(&id)
     }
 
+    pub fn iter_accounts(&self) -> impl Iterator<Item = (&ClientId, &Account)> {
+        self.accounts.iter()
+    }
+
 }
 
 

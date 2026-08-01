@@ -1,8 +1,10 @@
+use anyhow::Error;
 use rust_decimal::Decimal;
 use crate::model::{ClientId, TxId, Transaction};
+use crate::store::Store;
 use csv::{ReaderBuilder, Trim};
 use serde::Deserialize;
-use std::io::Read;
+use std::io::{Read, Write};
 use thiserror::Error;
 
 impl TryFrom<CsvRecord> for Transaction {
@@ -44,6 +46,24 @@ pub fn csv_reader<R: Read>(source: R) -> csv::Reader<R> {
         .trim(Trim::All)
         .flexible(true)
         .from_reader(source)
+}
+
+pub fn write_accounts<W: Write>(store: &Store, mut writer: W) -> Result<(), Error> {
+    writeln!(writer, "client,available,held,total,locked")?;
+
+    for (client, account) in store.iter_accounts() {
+        writeln!(
+            writer,
+            "{},{},{},{},{}",
+            client,
+            account.available,
+            account.held,
+            account.total(),
+            account.locked
+        )?;
+    }
+
+    Ok(())
 }
 
 #[derive(Debug, Deserialize)]
@@ -170,5 +190,42 @@ mod tests {
         assert_eq!(records.len(), 2);
         assert_eq!(records[1].kind, "dispute");
         assert_eq!(records[1].amount, None);
+    }
+    // --- Output writing ---
+
+    use crate::store::Store;
+
+    fn write_to_string(store: &Store) -> String {
+        let mut buf = Vec::new();
+        write_accounts(store, &mut buf).unwrap();
+        String::from_utf8(buf).unwrap()
+    }
+
+    #[test]
+    fn output_starts_with_the_header() {
+        let store = Store::new();
+
+        let output = write_to_string(&store);
+
+        assert_eq!(output.lines().next(), Some("client,available,held,total,locked"));
+    }
+
+    #[test]
+    fn writes_one_row_per_account_with_computed_total() {
+        let mut store = Store::new();
+
+        let a = store.account_or_create(1);
+        a.available = dec!(1.5);
+
+        let b = store.account_or_create(2);
+        b.available = dec!(-5);
+        b.held = dec!(5);
+        b.locked = true;
+
+        let output = write_to_string(&store);
+        let mut rows: Vec<&str> = output.lines().skip(1).collect();
+        rows.sort();
+
+        assert_eq!(rows, vec!["1,1.5,0,1.5,false", "2,-5,5,0,true"]);
     }
 }
