@@ -165,3 +165,19 @@ flowchart LR
 - **The read path replaces stdout.** The toy prints final state; in
   production a small account API / reporting service reads the balances from
   Postgres instead — writes and reads stay decoupled.
+
+## AI usage
+
+This solution was developed with AI assistance (Claude), used as a planning,
+review and documentation partner. The full session transcripts are in
+[`docs/AI-transcripts/`](docs/AI-transcripts/), in chronological order:
+
+1. **Edge-case mapping** — reviewing my problem notes for inconsistencies
+   and unmapped edge cases.
+2. **Architecture** — brainstorming each design decision and its trade-offs;
+   the output is the approved spec in `docs/superpowers/specs/`.
+3. **Implementation** — TDD sessions: tests mostly written by Claude from my
+   scenario lists, the implementation written by me, with a review after each
+   phase. The README was drafted by Claude from my outline and reviewed by me.
+4. **Code review and documentation** — a full-project review (fixes applied
+   after discussion) and the rustdoc pass.
