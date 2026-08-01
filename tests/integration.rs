@@ -16,7 +16,12 @@ struct Row {
 }
 
 fn row(available: Decimal, held: Decimal, locked: bool) -> Row {
-    Row { available, held, total: available + held, locked }
+    Row {
+        available,
+        held,
+        total: available + held,
+        locked,
+    }
 }
 
 /// Resolves a fixture file name to its absolute path so tests work
@@ -53,8 +58,19 @@ fn parse_output(output: &str) -> HashMap<ClientId, Row> {
         let (client, available, held, total, locked): (ClientId, Decimal, Decimal, Decimal, bool) =
             record.unwrap();
 
-        let previous = rows.insert(client, Row { available, held, total, locked });
-        assert!(previous.is_none(), "client {client} appears twice in output");
+        let previous = rows.insert(
+            client,
+            Row {
+                available,
+                held,
+                total,
+                locked,
+            },
+        );
+        assert!(
+            previous.is_none(),
+            "client {client} appears twice in output"
+        );
     }
     rows
 }
@@ -76,20 +92,14 @@ fn scenario_1_spec_example() {
 fn scenario_2_fraud_flow_leaves_negative_available_and_locks() {
     let (accounts, _) = run_pipeline("fraud_flow.csv");
 
-    assert_eq!(
-        accounts,
-        HashMap::from([(1, row(dec!(-5), dec!(0), true))])
-    );
+    assert_eq!(accounts, HashMap::from([(1, row(dec!(-5), dec!(0), true))]));
 }
 
 #[test]
 fn scenario_3_dispute_resolve_redispute_chargeback() {
     let (accounts, _) = run_pipeline("dispute_resolve_redispute_chargeback.csv");
 
-    assert_eq!(
-        accounts,
-        HashMap::from([(1, row(dec!(0), dec!(0), true))])
-    );
+    assert_eq!(accounts, HashMap::from([(1, row(dec!(0), dec!(0), true))]));
 }
 
 #[test]
@@ -126,10 +136,7 @@ fn scenario_6_locked_account_blocks_new_funds_but_disputes_still_process() {
     // After chargeback of tx 1: available 3, locked.
     // deposit tx 3 / withdrawal tx 4 ignored (locked).
     // dispute of tx 2 still processes: available 0, held 3.
-    assert_eq!(
-        accounts,
-        HashMap::from([(1, row(dec!(0), dec!(3), true))])
-    );
+    assert_eq!(accounts, HashMap::from([(1, row(dec!(0), dec!(3), true))]));
 }
 
 #[test]

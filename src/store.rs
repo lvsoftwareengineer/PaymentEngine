@@ -1,11 +1,10 @@
-use std::collections::HashMap;
 use crate::model::{Account, ClientId, DepositRecord, TxId};
-
+use std::collections::HashMap;
 
 #[derive(Default)]
 pub struct Store {
-    accounts: HashMap<ClientId,Account>,
-    deposits: HashMap<TxId, DepositRecord>
+    accounts: HashMap<ClientId, Account>,
+    deposits: HashMap<TxId, DepositRecord>,
 }
 
 impl Store {
@@ -30,9 +29,8 @@ impl Store {
     }
 
     pub fn insert_deposit(&mut self, id: TxId, record: DepositRecord) {
-        self.deposits.insert(id, record); 
+        self.deposits.insert(id, record);
     }
-
 
     pub fn contains_tx(&self, id: TxId) -> bool {
         self.deposits.contains_key(&id)
@@ -41,10 +39,7 @@ impl Store {
     pub fn iter_accounts(&self) -> impl Iterator<Item = (&ClientId, &Account)> {
         self.accounts.iter()
     }
-
 }
-
-
 
 #[cfg(test)]
 mod tests {

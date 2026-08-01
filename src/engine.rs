@@ -1,14 +1,14 @@
-use rust_decimal::Decimal;
 use crate::model::*;
 use crate::store::Store;
+use rust_decimal::Decimal;
 
 #[derive(Default)]
-pub struct PaymentEngine{
-    store: Store
+pub struct PaymentEngine {
+    store: Store,
 }
 
-impl PaymentEngine{
-    pub fn new() -> Self{
+impl PaymentEngine {
+    pub fn new() -> Self {
         Self::default()
     }
 
@@ -25,10 +25,10 @@ impl PaymentEngine{
             Transaction::Chargeback { client, tx } => self.chargeback(client, tx),
         }
     }
-    
+
     fn deposit(&mut self, client: ClientId, tx: TxId, amount: Decimal) -> Result<(), TxError> {
         let account = self.store.account_or_create(client);
-    
+
         if account.locked {
             return Err(TxError::AccountLocked { client });
         }
@@ -38,9 +38,16 @@ impl PaymentEngine{
         if self.store.contains_tx(tx) {
             return Err(TxError::DuplicateTx { tx });
         }
-    
+
         self.store.account_or_create(client).available += amount;
-        self.store.insert_deposit(tx, DepositRecord { client, amount, state: DepositState::Posted });
+        self.store.insert_deposit(
+            tx,
+            DepositRecord {
+                client,
+                amount,
+                state: DepositState::Posted,
+            },
+        );
         Ok(())
     }
 
@@ -55,73 +62,93 @@ impl PaymentEngine{
         }
 
         if account.available < amount {
-            return Err(TxError::InsufficientFunds { available: account.available, requested: amount });
+            return Err(TxError::InsufficientFunds {
+                available: account.available,
+                requested: amount,
+            });
         }
         account.available -= amount;
         Ok(())
     }
 
     fn dispute(&mut self, client: ClientId, tx: TxId) -> Result<(), TxError> {
-        let record = self.store.get_deposit_mut(tx).ok_or(TxError::UnknownTx { tx })?;
-    
+        let record = self
+            .store
+            .get_deposit_mut(tx)
+            .ok_or(TxError::UnknownTx { tx })?;
+
         if record.client != client {
-            return Err(TxError::ClientMismatch { tx, owner: record.client, claimed: client });
+            return Err(TxError::ClientMismatch {
+                tx,
+                owner: record.client,
+                claimed: client,
+            });
         }
         if record.state != DepositState::Posted {
             return Err(TxError::NotDisputable { tx });
         }
-    
+
         record.state = DepositState::Disputed;
         let amount = record.amount;
-    
+
         let account = self.store.account_or_create(client);
         account.available -= amount;
         account.held += amount;
         Ok(())
     }
-    
+
     fn resolve(&mut self, client: ClientId, tx: TxId) -> Result<(), TxError> {
-        let record = self.store.get_deposit_mut(tx).ok_or(TxError::UnknownTx { tx })?;
-    
+        let record = self
+            .store
+            .get_deposit_mut(tx)
+            .ok_or(TxError::UnknownTx { tx })?;
+
         if record.client != client {
-            return Err(TxError::ClientMismatch { tx, owner: record.client, claimed: client });
+            return Err(TxError::ClientMismatch {
+                tx,
+                owner: record.client,
+                claimed: client,
+            });
         }
         if record.state != DepositState::Disputed {
             return Err(TxError::NotUnderDispute { tx });
         }
-    
+
         record.state = DepositState::Posted;
         let amount = record.amount;
-    
+
         let account = self.store.account_or_create(client);
         account.held -= amount;
         account.available += amount;
         Ok(())
     }
-    
+
     fn chargeback(&mut self, client: ClientId, tx: TxId) -> Result<(), TxError> {
-        let record = self.store.get_deposit_mut(tx).ok_or(TxError::UnknownTx { tx })?;
-    
+        let record = self
+            .store
+            .get_deposit_mut(tx)
+            .ok_or(TxError::UnknownTx { tx })?;
+
         if record.client != client {
-            return Err(TxError::ClientMismatch { tx, owner: record.client, claimed: client });
+            return Err(TxError::ClientMismatch {
+                tx,
+                owner: record.client,
+                claimed: client,
+            });
         }
         if record.state != DepositState::Disputed {
             return Err(TxError::NotUnderDispute { tx });
         }
-    
+
         record.state = DepositState::ChargedBack;
         let amount = record.amount;
-    
+
         let account = self.store.account_or_create(client);
         account.held -= amount;
         account.locked = true;
         Ok(())
     }
-
 }
-
-
-
 
 #[cfg(test)]
 mod tests {
@@ -151,7 +178,10 @@ mod tests {
         assert_eq!(account.held, Decimal::ZERO);
         assert!(!account.locked);
 
-        let record = engine.store.get_deposit(1).expect("deposit 1 should be stored");
+        let record = engine
+            .store
+            .get_deposit(1)
+            .expect("deposit 1 should be stored");
         assert_eq!(record.client, 1);
         assert_eq!(record.amount, dec!(2.5));
         assert!(matches!(record.state, DepositState::Posted));
@@ -277,7 +307,10 @@ mod tests {
 
         assert_eq!(
             result,
-            Err(TxError::InsufficientFunds { available: dec!(1), requested: dec!(2) })
+            Err(TxError::InsufficientFunds {
+                available: dec!(1),
+                requested: dec!(2)
+            })
         );
         assert_eq!(engine.store.account_or_create(1).available, dec!(1));
     }
@@ -301,7 +334,10 @@ mod tests {
 
         assert_eq!(
             result,
-            Err(TxError::InsufficientFunds { available: dec!(0), requested: dec!(1) })
+            Err(TxError::InsufficientFunds {
+                available: dec!(0),
+                requested: dec!(1)
+            })
         );
         assert!(engine.store.get_account(9).is_some());
     }
@@ -359,7 +395,11 @@ mod tests {
 
         assert_eq!(
             result,
-            Err(TxError::ClientMismatch { tx: 1, owner: 1, claimed: 2 })
+            Err(TxError::ClientMismatch {
+                tx: 1,
+                owner: 1,
+                claimed: 2
+            })
         );
 
         let account = engine.store.account_or_create(1);
@@ -395,7 +435,11 @@ mod tests {
         let mut engine = PaymentEngine::new();
         engine.store.insert_deposit(
             1,
-            DepositRecord { client: 1, amount: dec!(5), state: DepositState::ChargedBack },
+            DepositRecord {
+                client: 1,
+                amount: dec!(5),
+                state: DepositState::ChargedBack,
+            },
         );
 
         let result = engine.process(dispute(1, 1));
@@ -488,7 +532,11 @@ mod tests {
 
         assert_eq!(
             result,
-            Err(TxError::ClientMismatch { tx: 1, owner: 1, claimed: 2 })
+            Err(TxError::ClientMismatch {
+                tx: 1,
+                owner: 1,
+                claimed: 2
+            })
         );
         assert_eq!(engine.store.account_or_create(1).held, dec!(5));
         assert!(matches!(
@@ -516,7 +564,11 @@ mod tests {
         let mut engine = PaymentEngine::new();
         engine.store.insert_deposit(
             1,
-            DepositRecord { client: 1, amount: dec!(5), state: DepositState::ChargedBack },
+            DepositRecord {
+                client: 1,
+                amount: dec!(5),
+                state: DepositState::ChargedBack,
+            },
         );
 
         let result = engine.process(resolve(1, 1));
@@ -607,7 +659,11 @@ mod tests {
 
         assert_eq!(
             result,
-            Err(TxError::ClientMismatch { tx: 1, owner: 1, claimed: 2 })
+            Err(TxError::ClientMismatch {
+                tx: 1,
+                owner: 1,
+                claimed: 2
+            })
         );
 
         let account = engine.store.account_or_create(1);

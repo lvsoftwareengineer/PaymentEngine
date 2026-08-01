@@ -1,9 +1,8 @@
-use anyhow::Error;
-use rust_decimal::Decimal;
 use crate::engine::PaymentEngine;
-use crate::model::{ClientId, TxId, Transaction};
+use crate::model::{ClientId, Transaction, TxId};
 use crate::store::Store;
 use csv::{ReaderBuilder, Trim};
+use rust_decimal::Decimal;
 use serde::Deserialize;
 use std::io::{Read, Write};
 use thiserror::Error;
@@ -12,7 +11,12 @@ impl TryFrom<CsvRecord> for Transaction {
     type Error = RowError;
 
     fn try_from(record: CsvRecord) -> Result<Self, Self::Error> {
-        let CsvRecord { kind, client, tx, amount } = record;
+        let CsvRecord {
+            kind,
+            client,
+            tx,
+            amount,
+        } = record;
 
         match kind.to_ascii_lowercase().as_str() {
             "deposit" => Ok(Transaction::Deposit {
@@ -28,7 +32,10 @@ impl TryFrom<CsvRecord> for Transaction {
             "dispute" => Ok(Transaction::Dispute { client, tx }),
             "resolve" => Ok(Transaction::Resolve { client, tx }),
             "chargeback" => Ok(Transaction::Chargeback { client, tx }),
-            other => Err(RowError::UnknownType { kind: other.to_string(), tx }),
+            other => Err(RowError::UnknownType {
+                kind: other.to_string(),
+                tx,
+            }),
         }
     }
 }
@@ -49,7 +56,11 @@ pub fn csv_reader<R: Read>(source: R) -> csv::Reader<R> {
         .from_reader(source)
 }
 
-pub fn process_csv<R: Read>(input: R, engine: &mut PaymentEngine, mut on_error: impl FnMut(String)) {
+pub fn process_csv<R: Read>(
+    input: R,
+    engine: &mut PaymentEngine,
+    mut on_error: impl FnMut(String),
+) {
     for row in csv_reader(input).deserialize::<CsvRecord>() {
         let record = match row {
             Ok(record) => record,
@@ -70,7 +81,7 @@ pub fn process_csv<R: Read>(input: R, engine: &mut PaymentEngine, mut on_error: 
     }
 }
 
-pub fn write_accounts<W: Write>(store: &Store, mut writer: W) -> Result<(), Error> {
+pub fn write_accounts<W: Write>(store: &Store, mut writer: W) -> std::io::Result<()> {
     writeln!(writer, "client,available,held,total,locked")?;
 
     for (client, account) in store.iter_accounts() {
@@ -94,7 +105,7 @@ pub struct CsvRecord {
     pub kind: String,
     pub client: ClientId,
     pub tx: TxId,
-    pub amount: Option<Decimal>
+    pub amount: Option<Decimal>,
 }
 
 #[cfg(test)]
@@ -104,7 +115,12 @@ mod tests {
     use rust_decimal_macros::dec;
 
     fn record(kind: &str, client: ClientId, tx: TxId, amount: Option<Decimal>) -> CsvRecord {
-        CsvRecord { kind: kind.to_string(), client, tx, amount }
+        CsvRecord {
+            kind: kind.to_string(),
+            client,
+            tx,
+            amount,
+        }
     }
 
     // --- CsvRecord -> Transaction conversion ---
@@ -113,11 +129,19 @@ mod tests {
     fn all_five_type_strings_convert_to_the_right_variant() {
         assert_eq!(
             Transaction::try_from(record("deposit", 1, 1, Some(dec!(1.5)))),
-            Ok(Transaction::Deposit { client: 1, tx: 1, amount: dec!(1.5) })
+            Ok(Transaction::Deposit {
+                client: 1,
+                tx: 1,
+                amount: dec!(1.5)
+            })
         );
         assert_eq!(
             Transaction::try_from(record("withdrawal", 1, 2, Some(dec!(1.5)))),
-            Ok(Transaction::Withdraw { client: 1, tx: 2, amount: dec!(1.5) })
+            Ok(Transaction::Withdraw {
+                client: 1,
+                tx: 2,
+                amount: dec!(1.5)
+            })
         );
         assert_eq!(
             Transaction::try_from(record("dispute", 1, 1, None)),
@@ -139,7 +163,10 @@ mod tests {
 
         assert_eq!(
             result,
-            Err(RowError::UnknownType { kind: "transfer".to_string(), tx: 1 })
+            Err(RowError::UnknownType {
+                kind: "transfer".to_string(),
+                tx: 1
+            })
         );
     }
 
@@ -175,11 +202,19 @@ mod tests {
     fn amount_is_rounded_to_four_decimal_places_at_conversion() {
         assert_eq!(
             Transaction::try_from(record("deposit", 1, 1, Some(dec!(1.23456)))),
-            Ok(Transaction::Deposit { client: 1, tx: 1, amount: dec!(1.2346) })
+            Ok(Transaction::Deposit {
+                client: 1,
+                tx: 1,
+                amount: dec!(1.2346)
+            })
         );
         assert_eq!(
             Transaction::try_from(record("withdrawal", 1, 2, Some(dec!(0.99999)))),
-            Ok(Transaction::Withdraw { client: 1, tx: 2, amount: dec!(1.0000) })
+            Ok(Transaction::Withdraw {
+                client: 1,
+                tx: 2,
+                amount: dec!(1.0000)
+            })
         );
     }
 
@@ -190,13 +225,21 @@ mod tests {
         let input = "type, client, tx, amount\ndeposit, 1, 1, 1.0\n";
 
         let mut reader = csv_reader(input.as_bytes());
-        let records: Vec<CsvRecord> =
-            reader.deserialize().collect::<Result<_, _>>().unwrap();
+        let records: Vec<CsvRecord> = reader.deserialize().collect::<Result<_, _>>().unwrap();
 
         assert_eq!(records.len(), 1);
         assert_eq!(
-            Transaction::try_from(record("deposit", records[0].client, records[0].tx, records[0].amount)),
-            Ok(Transaction::Deposit { client: 1, tx: 1, amount: dec!(1.0) })
+            Transaction::try_from(record(
+                "deposit",
+                records[0].client,
+                records[0].tx,
+                records[0].amount
+            )),
+            Ok(Transaction::Deposit {
+                client: 1,
+                tx: 1,
+                amount: dec!(1.0)
+            })
         );
         assert_eq!(records[0].kind, "deposit");
     }
@@ -206,8 +249,7 @@ mod tests {
         let input = "type, client, tx, amount\ndeposit, 1, 1, 1.0\ndispute, 1, 1\n";
 
         let mut reader = csv_reader(input.as_bytes());
-        let records: Vec<CsvRecord> =
-            reader.deserialize().collect::<Result<_, _>>().unwrap();
+        let records: Vec<CsvRecord> = reader.deserialize().collect::<Result<_, _>>().unwrap();
 
         assert_eq!(records.len(), 2);
         assert_eq!(records[1].kind, "dispute");
@@ -257,7 +299,10 @@ withdrawal, 1, 4, 100.0
 
         let output = write_to_string(&store);
 
-        assert_eq!(output.lines().next(), Some("client,available,held,total,locked"));
+        assert_eq!(
+            output.lines().next(),
+            Some("client,available,held,total,locked")
+        );
     }
 
     #[test]

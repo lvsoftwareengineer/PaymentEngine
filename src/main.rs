@@ -9,8 +9,7 @@ fn main() -> anyhow::Result<()> {
         .nth(1)
         .context("usage: payment_engine <transactions.csv>")?;
 
-    let file = File::open(&path)
-        .with_context(|| format!("cannot open input file {path:?}"))?;
+    let file = File::open(&path).with_context(|| format!("cannot open input file {path:?}"))?;
 
     let mut engine = PaymentEngine::new();
     process_csv(file, &mut engine, |error| eprintln!("{error}"));
