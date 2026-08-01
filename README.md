@@ -67,7 +67,7 @@ main.rs          CLI edge: open file, wire pipeline, log rejections to stderr
 
 ## Correctness & testing
 
-62 tests, written test-first:
+66 tests, written test-first:
 
 - **Unit tests** cover every cell of the engine's rules table: each happy path
   and each rejection, asserting the exact `TxError` and that state is
