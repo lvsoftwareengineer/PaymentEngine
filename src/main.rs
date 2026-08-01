@@ -2,7 +2,7 @@ use anyhow::Context;
 use payment_engine::engine::PaymentEngine;
 use payment_engine::io::{process_csv, write_accounts};
 use std::fs::File;
-use std::io::BufWriter;
+use std::io::{BufWriter, Write};
 
 fn main() -> anyhow::Result<()> {
     let path = std::env::args()
@@ -14,7 +14,9 @@ fn main() -> anyhow::Result<()> {
     let mut engine = PaymentEngine::new();
     process_csv(file, &mut engine, |error| eprintln!("{error}"));
 
-    write_accounts(engine.store(), BufWriter::new(std::io::stdout().lock()))?;
+    let mut writer = BufWriter::new(std::io::stdout().lock());
+    write_accounts(engine.store(), &mut writer)?;
+    writer.flush().context("cannot write accounts output")?;
 
     Ok(())
 }

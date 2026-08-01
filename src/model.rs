@@ -87,4 +87,7 @@ pub enum TxError {
 
     #[error("Transaction {tx} is not under dispute")]
     NotUnderDispute { tx: TxId },
+
+    #[error("Transaction {tx} would overflow the account balance")]
+    BalanceOverflow { tx: TxId },
 }

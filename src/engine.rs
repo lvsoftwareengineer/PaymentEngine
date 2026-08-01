@@ -39,7 +39,16 @@ impl PaymentEngine {
             return Err(TxError::DuplicateTx { tx });
         }
 
-        self.store.account_or_create(client).available += amount;
+        let account = self.store.account_or_create(client);
+        let new_available = account
+            .available
+            .checked_add(amount)
+            .ok_or(TxError::BalanceOverflow { tx })?;
+
+        if new_available.checked_add(account.held).is_none() {
+            return Err(TxError::BalanceOverflow { tx });
+        }
+        account.available = new_available;
         self.store.insert_deposit(
             tx,
             DepositRecord {
@@ -51,7 +60,7 @@ impl PaymentEngine {
         Ok(())
     }
 
-    fn withdraw(&mut self, client: ClientId, _tx: TxId, amount: Decimal) -> Result<(), TxError> {
+    fn withdraw(&mut self, client: ClientId, tx: TxId, amount: Decimal) -> Result<(), TxError> {
         let account = self.store.account_or_create(client);
 
         if account.locked {
@@ -67,14 +76,17 @@ impl PaymentEngine {
                 requested: amount,
             });
         }
-        account.available -= amount;
+        account.available = account
+            .available
+            .checked_sub(amount)
+            .ok_or(TxError::BalanceOverflow { tx })?;
         Ok(())
     }
 
     fn dispute(&mut self, client: ClientId, tx: TxId) -> Result<(), TxError> {
         let record = self
             .store
-            .get_deposit_mut(tx)
+            .get_deposit(tx)
             .ok_or(TxError::UnknownTx { tx })?;
 
         if record.client != client {
@@ -87,20 +99,31 @@ impl PaymentEngine {
         if record.state != DepositState::Posted {
             return Err(TxError::NotDisputable { tx });
         }
-
-        record.state = DepositState::Disputed;
         let amount = record.amount;
 
         let account = self.store.account_or_create(client);
-        account.available -= amount;
-        account.held += amount;
+        let new_available = account
+            .available
+            .checked_sub(amount)
+            .ok_or(TxError::BalanceOverflow { tx })?;
+        let new_held = account
+            .held
+            .checked_add(amount)
+            .ok_or(TxError::BalanceOverflow { tx })?;
+        account.available = new_available;
+        account.held = new_held;
+
+        self.store
+            .get_deposit_mut(tx)
+            .expect("existence checked above")
+            .state = DepositState::Disputed;
         Ok(())
     }
 
     fn resolve(&mut self, client: ClientId, tx: TxId) -> Result<(), TxError> {
         let record = self
             .store
-            .get_deposit_mut(tx)
+            .get_deposit(tx)
             .ok_or(TxError::UnknownTx { tx })?;
 
         if record.client != client {
@@ -113,20 +136,31 @@ impl PaymentEngine {
         if record.state != DepositState::Disputed {
             return Err(TxError::NotUnderDispute { tx });
         }
-
-        record.state = DepositState::Posted;
         let amount = record.amount;
 
         let account = self.store.account_or_create(client);
-        account.held -= amount;
-        account.available += amount;
+        let new_held = account
+            .held
+            .checked_sub(amount)
+            .ok_or(TxError::BalanceOverflow { tx })?;
+        let new_available = account
+            .available
+            .checked_add(amount)
+            .ok_or(TxError::BalanceOverflow { tx })?;
+        account.held = new_held;
+        account.available = new_available;
+
+        self.store
+            .get_deposit_mut(tx)
+            .expect("existence checked above")
+            .state = DepositState::Posted;
         Ok(())
     }
 
     fn chargeback(&mut self, client: ClientId, tx: TxId) -> Result<(), TxError> {
         let record = self
             .store
-            .get_deposit_mut(tx)
+            .get_deposit(tx)
             .ok_or(TxError::UnknownTx { tx })?;
 
         if record.client != client {
@@ -139,13 +173,19 @@ impl PaymentEngine {
         if record.state != DepositState::Disputed {
             return Err(TxError::NotUnderDispute { tx });
         }
-
-        record.state = DepositState::ChargedBack;
         let amount = record.amount;
 
         let account = self.store.account_or_create(client);
-        account.held -= amount;
+        account.held = account
+            .held
+            .checked_sub(amount)
+            .ok_or(TxError::BalanceOverflow { tx })?;
         account.locked = true;
+
+        self.store
+            .get_deposit_mut(tx)
+            .expect("existence checked above")
+            .state = DepositState::ChargedBack;
         Ok(())
     }
 }
@@ -731,6 +771,54 @@ mod tests {
         assert!(matches!(
             engine.store.get_deposit(2).unwrap().state,
             DepositState::Disputed
+        ));
+    }
+
+    // --- Overflow safety ---
+
+    #[test]
+    fn deposit_overflowing_available_is_rejected_and_state_untouched() {
+        let mut engine = PaymentEngine::new();
+        engine.process(deposit(1, 1, Decimal::MAX)).unwrap();
+
+        let result = engine.process(deposit(1, 2, dec!(1)));
+
+        assert_eq!(result, Err(TxError::BalanceOverflow { tx: 2 }));
+        assert_eq!(engine.store.account_or_create(1).available, Decimal::MAX);
+        assert!(!engine.store.contains_tx(2));
+    }
+
+    #[test]
+    fn deposit_overflowing_total_is_rejected_even_when_available_fits() {
+        let mut engine = PaymentEngine::new();
+        engine.process(deposit(1, 1, Decimal::MAX)).unwrap();
+        engine.process(dispute(1, 1)).unwrap(); // available 0, held MAX
+
+        let result = engine.process(deposit(1, 2, Decimal::MAX));
+
+        assert_eq!(result, Err(TxError::BalanceOverflow { tx: 2 }));
+        assert_eq!(engine.store.account_or_create(1).available, Decimal::ZERO);
+        assert!(!engine.store.contains_tx(2));
+    }
+
+    #[test]
+    fn dispute_overflowing_held_is_rejected_and_record_stays_posted() {
+        let mut engine = PaymentEngine::new();
+        engine.process(deposit(1, 1, Decimal::MAX)).unwrap();
+        engine.process(withdraw(1, 2, Decimal::MAX)).unwrap(); // available 0
+        engine.process(deposit(1, 3, Decimal::MAX)).unwrap(); // available MAX
+        engine.process(dispute(1, 1)).unwrap(); // available 0, held MAX
+
+        let result = engine.process(dispute(1, 3)); // held MAX + MAX overflows
+
+        assert_eq!(result, Err(TxError::BalanceOverflow { tx: 3 }));
+
+        let account = engine.store.account_or_create(1);
+        assert_eq!(account.available, Decimal::ZERO);
+        assert_eq!(account.held, Decimal::MAX);
+        assert!(matches!(
+            engine.store.get_deposit(3).unwrap().state,
+            DepositState::Posted
         ));
     }
 }
