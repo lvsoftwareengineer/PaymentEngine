@@ -230,13 +230,13 @@ mod tests {
     #[test]
     fn process_csv_runs_rows_through_the_engine_and_reports_failures() {
         let input = "\
-            type, client, tx, amount
-            deposit, 1, 1, 10.0
-            withdrawal, 1, 2, 3.0
-            transfer, 1, 3, 1.0
-            junk
-            withdrawal, 1, 4, 100.0
-        ";
+type, client, tx, amount
+deposit, 1, 1, 10.0
+withdrawal, 1, 2, 3.0
+transfer, 1, 3, 1.0
+junk
+withdrawal, 1, 4, 100.0
+";
         let mut engine = PaymentEngine::new();
         let mut errors = Vec::new();
 
