@@ -12,6 +12,10 @@ impl PaymentEngine{
         Self::default()
     }
 
+    pub fn store(&self) -> &Store {
+        &self.store
+    }
+
     pub fn process(&mut self, tx: Transaction) -> Result<(), TxError> {
         match tx {
             Transaction::Deposit { client, tx, amount } => self.deposit(client, tx, amount),
