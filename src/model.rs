@@ -1,9 +1,9 @@
 use rust_decimal::Decimal;
 use thiserror::Error;
-
 pub type ClientId = u16;
 pub type TxId = u32;
 
+#[derive(Debug, PartialEq)]
 pub enum Transaction {
     Deposit {client: ClientId, tx: TxId, amount: Decimal},
     Withdraw {client: ClientId, tx: TxId, amount: Decimal},
