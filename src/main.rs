@@ -10,7 +10,9 @@ use payment_engine::io::{process_csv, write_accounts};
 use std::fs::File;
 use std::io::{BufWriter, Write};
 
-fn main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    // We are now running under tokio. We can spawn tasks or use async features here.
     let path = std::env::args()
         .nth(1)
         .context("usage: payment_engine <transactions.csv>")?;
